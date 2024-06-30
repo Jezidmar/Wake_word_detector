@@ -1,11 +1,17 @@
-Following is the detailed desription of construction of Keyword spotter module with Kaldi framework.
+# Construction of Keyword Spotter Module with Kaldi Framework
 
-First step is to clone the kaldi directory using: git clone https://github.com/kaldi-asr/kaldi.git
+## Step 1: Clone Kaldi Repository
+```bash
+git clone https://github.com/kaldi-asr/kaldi.git
 
-Now, follow the instructions from the repo to build Kaldi WITH cuda. We need cuda for training phase.
+2. Follow the instructions from the repo to build Kaldi WITH cuda. We need cuda for training phase.
 
-After kaldi is built, enter /kaldi/egs/snips/v1/ and examine readme file. To run the pipeline, modify run.sh file. In notebook generate_metadata_kaldi.ipynb one can find suitable formatting for constructing dataset.
+3. After Kaldi is built, enter `/kaldi/egs/snips/v1/` and examine readme file.
 
-Extracted data will be saved in /data/ directory where all the augmentations will also be positioned. 
+4. To run the pipeline, modify run.sh file.
 
-To complete the pipeline, the required time is around 3 days. 
+5. In notebook `generate_metadata_kaldi.ipynb` one can find suitable formatting for constructing dataset.
+
+6. Extracted data will be saved in `/data/` directory where all the augmentations will also be positioned.
+
+7. To complete the pipeline, the required time is around 3 days.
