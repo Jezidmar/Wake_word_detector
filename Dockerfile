@@ -1,4 +1,4 @@
-# Use an official Python runtime as a parent image
+# This is version created for annotating speech. It is ment to be run on GPU, otherwise there will be high latency.
 FROM python:3.8
 
 # Set the working directory to /opt/app
