@@ -13,3 +13,6 @@
 7. Extracted data will be saved in `/data/` directory where all the augmentations will also be positioned.
 
 8. To complete the pipeline, the required time is around 3 days.
+
+
+Framework follows this implementation: https://arxiv.org/pdf/2005.08347
