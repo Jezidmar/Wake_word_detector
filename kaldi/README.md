@@ -15,4 +15,4 @@
 8. To complete the pipeline, the required time is around 3 days.
 
 
-Framework follows this implementation: https://arxiv.org/pdf/2005.08347
+Framework follows this paper: https://arxiv.org/pdf/2005.08347
