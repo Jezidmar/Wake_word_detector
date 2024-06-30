@@ -1,6 +1,6 @@
 # Construction of Keyword Spotter Module with Kaldi Framework
 
-1. Clone the Kaldi repository: git clone https://github.com/kaldi-asr/kaldi.git
+1. Clone the Kaldi repository: [git clone https://github.com/kaldi-asr/kaldi.git]
 
 3. Follow the instructions from the repo to build Kaldi WITH cuda. We need cuda for training phase.
 
