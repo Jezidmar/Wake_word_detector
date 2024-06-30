@@ -2,7 +2,7 @@
 
 1. Clone the Kaldi repository:
    ```bash
-git clone https://github.com/kaldi-asr/kaldi.git
+   git clone https://github.com/kaldi-asr/kaldi.git
 
 3. Follow the instructions from the repo to build Kaldi WITH cuda. We need cuda for training phase.
 
