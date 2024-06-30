@@ -1,9 +1,0 @@
-numpy
-onnxruntime
-librosa
-opencv-python
-soundfile
-sounddevice==0.4.6
-pyaudio
-torch
-torchaudio
