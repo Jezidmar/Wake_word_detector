@@ -20,8 +20,9 @@ For training each model, I used roughly 3M audio files from People's speech data
 After the model is trained, we can convert it into onnx or tflite format suitable for edge device. Find .ipynb script for converting in /models folder.
 
 For benchmarking performance, I devised 2 testing sets:
-  -test_clean -  1155 samples generated with high SNR(>10) using VCTK dataset voices. There are no real samples. This should be added in future.
-  -test_other -  2126 noisier samples. I used background noise mixing methods.
+  
+  - test_clean -  1155 samples generated with high SNR(>10) using VCTK dataset voices. There are no real samples. This should be added in future.
+  - test_other -  2126 noisier samples. I used background noise mixing methods.
 
 Complete list of used datasets:
   - Librispeech-test-clean(background speech augmentation)
