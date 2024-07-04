@@ -2,3 +2,10 @@ Following are the details on implementation of paper: https://arxiv.org/abs/2209
 
 In summary, system architecture is below. 
 ![Alt text](arch.png)
+
+Work is entirely based on synthesized data. One can find scripts for synthesizing data in folder /data. For now, only TortoiseTTS and WaveGlow are used for synthetizing. In future work, I will add VCTK and MARS. 
+
+For capturing voice embeddings, I used the following datasets:
+  - VoxCeleb Gender: https://dagshub.com/DagsHub/audio-datasets/src/main/voice_gender_detection (~7000 voices)
+  - Speech accent archive: https://www.kaggle.com/datasets/rtatman/speech-accent-archive (~2300 voices)
+  - People's Speech: https://mlcommons.org/datasets/peoples-speech/ (~15000 voices / randomly selected)
