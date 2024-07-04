@@ -12,7 +12,9 @@ For capturing voice embeddings, I used the following datasets:
 
 
 For training each model, I used roughly 3M audio files from People's speech dataset and chunk of CommonVoice dataset for the negative samples. This is approximately 5500h of speech. Production grade systems are trained on multiple times bigger datasets so I expect the achieved performance to be increased by further expanding the training set size. As for positive samples, I used following augmentation pipeline:  
+<p align="center">
 <img src="images/aug_pipeline.png" alt="Alt text" width="400"/>
+</p>
 
 After the model is trained, we can convert it into onnx or tflite format suitable for edge device. Find .ipynb script for converting in /models folder.
 
