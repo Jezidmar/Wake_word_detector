@@ -16,6 +16,7 @@ For training each model, I used roughly 3M audio files from People's speech data
 <img src="images/aug_pipeline.png" alt="Alt text" width="400"/>
 </p>
 
+
 After the model is trained, we can convert it into onnx or tflite format suitable for edge device. Find .ipynb script for converting in /models folder.
 
 
