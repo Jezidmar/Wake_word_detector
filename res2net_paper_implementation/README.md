@@ -36,5 +36,5 @@ After the model is trained, we can convert it into onnx or tflite format suitabl
   - Vocalsound(training set)
   - Speech accent(training set)
 
-
+Proposed performance benchmark is DET curve. Find the implementation notebook in /inference folder.
 
