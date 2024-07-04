@@ -1,6 +1,6 @@
 import os
-os.environ["HF_HOME"] = "/mnt/nvme_ssd_1/marin_data"
-os.environ["HF_DATASETS_CACHE"] = "/mnt/nvme_ssd_1/marin_data"
+os.environ["HF_HOME"] = ""
+os.environ["HF_DATASETS_CACHE"] = ""
 
 from huggingface_hub import login 
 login(' -- code --')
