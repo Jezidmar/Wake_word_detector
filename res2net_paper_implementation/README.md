@@ -39,9 +39,3 @@ After the model is trained, we can convert it into onnx or tflite format suitabl
 Proposed performance benchmark is DET curve. Find the implementation notebook in /inference folder.
 
 
-Following are synthesized samples using aforementioned methods:
-<audio controls>
-  <source src="heyjules_noisy.wav" type="audio/mpeg">
-  Your browser does not support the audio element.
-</audio>
-
