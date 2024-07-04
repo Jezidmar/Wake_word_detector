@@ -41,7 +41,7 @@ Proposed performance benchmark is DET curve. Find the implementation notebook in
 
 Following are synthesized samples using aforementioned methods:
 <audio controls>
-  <source src="/samples/heyjules.wav" type="audio/wav">
+  <source src="heyjules_noisy.wav" type="audio/mpeg">
   Your browser does not support the audio element.
 </audio>
 
