@@ -9,3 +9,7 @@ For capturing voice embeddings, I used the following datasets:
   - VoxCeleb Gender: https://dagshub.com/DagsHub/audio-datasets/src/main/voice_gender_detection (~7000 voices)
   - Speech accent archive: https://www.kaggle.com/datasets/rtatman/speech-accent-archive (~2300 voices)
   - People's Speech: https://mlcommons.org/datasets/peoples-speech/ (~15000 voices / randomly selected)
+
+
+For training each model, I used roughly 3M audio files from People's speech dataset and chunk of CommonVoice dataset for the negative samples. This is approximately 5500h of speech. Production grade systems are trained on multiple times bigger datasets so I expect the achieved performance to be increased by further expanding the training set size. As for positive samples, I used following augmentation pipeline:  
+![Alt text](aug_pipeline.png)
