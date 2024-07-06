@@ -39,7 +39,7 @@ def audio_processor(audio_queue, porcupine, detection_list):
 def main():
     porcupine = pvporcupine.create(
     access_key='FB7jo4vQwScNqXa5J2E+/nCXw3wag8lSs4oj6RpfnJCK6NZopYcxSg==',
-    keyword_paths=['/home/marinjezidzic/Downloads/Hey-Jules_en_linux_v3_0_0/Hey-Jules_en_linux_v3_0_0.ppn'],
+    keyword_paths=['Hey-Jules_en_linux_v3_0_0.ppn'],
     
     )
 
