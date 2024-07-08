@@ -39,3 +39,37 @@ After the model is trained, we can convert it into onnx or tflite format suitabl
 Proposed performance benchmark is DET curve. Find the implementation notebook in /inference folder.
 
 
+### To initiate training of M0 model run following:
+```
+python train_M0.py \
+  --train_csv_file /path/to/train.csv \
+  --train_csv_file_stage2 /path/to/train_stage2.csv \
+  --test_csv_file /path/to/test.csv \
+  --ngpu 4 \
+  --batch_size 256 \
+  --num_stage_1_epochs 10 \
+  --num_stage_2_epochs 5 \
+  --pretrained_model_path /path/to/pretrained/model.pth \
+  --clip_norm 1.0 \
+  --lr 3e-4 \
+  --save_path /path/to/save/checkpoints \
+  --use_version_1 True
+```
+### To initiate training of M1 model run following:
+```
+python train_M1.py \
+  --train_csv_file /path/to/train.csv \
+  --train_csv_file_stage2 /path/to/train_stage2.csv \
+  --test_csv_file /path/to/test.csv \
+  --ngpu 4 \
+  --batch_size 256 \
+  --num_stage_1_epochs 10 \
+  --num_stage_2_epochs 5 \
+  --pretrained_model_path /path/to/pretrained/model.pth \
+  --clip_norm 1.0 \
+  --lr 3e-4 \
+  --save_path /path/to/save/checkpoints \
+  --use_version_1 True
+```
+
+
