@@ -17,13 +17,15 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed import init_process_group,destroy_process_group
+import argparse
+import sys
 
 
 # -----------------------------------------------------
 # Setting up ddp
 def ddp_setup(rank, world_size):
-    os.environ["MASTER_ADDR"]= "172.16.170.6"
-    os.environ["MASTER_PORT"]= "65521"
+    os.environ["MASTER_ADDR"]= ""
+    os.environ["MASTER_PORT"]= ""
     init_process_group(backend="nccl",rank=rank,world_size=world_size)
 
 
@@ -260,7 +262,7 @@ def trainer(rank, world_size,hparams):
 
     model_slow = resnet50(num_classes=1, in_channels=1)
     
-    if hparams['load_pretrained']==True:
+    if hparams['pretrained_model_path']:
         state_dict = torch.load(hparams['pretrained_model_path']) # this should be loaded to CUDA:0 by default and but it does not matter since we transfer it to 'rank' device later on.
         model_slow.load_state_dict(state_dict)
     
@@ -277,7 +279,7 @@ def trainer(rank, world_size,hparams):
     ddp_mp_model = DDP(ddp_mp_model, device_ids=[rank])
     
     # Optimizer config
-    optimizer = optim.Adam(ddp_mp_model.parameters(), lr=3e-4)
+    optimizer = optim.Adam(ddp_mp_model.parameters(), lr=hparams['lr'])
     lambda1 = lambda epoch: 0.65 ** epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
@@ -327,19 +329,35 @@ def main(rank: int, world_size: int, hparams: dict):
     destroy_process_group()
 
 if __name__=="__main__":
-    import sys
-    world_size  = torch.cuda.device_count()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train_csv_file',type=str, help='Metadata for training set first stage')
+    parser.add_argument('--train_csv_file_stage2',type=str, help='Metadata for training set second stage')
+    parser.add_argument('--test_csv_file',type=str, help='Metadata for testing set')
+    parser.add_argument('--ngpu',type=int, help='Number of graphical units to use')
+    parser.add_argument('--batch_size',type=int, help='Batch size during training phase')
+    parser.add_argument('--num_stage_1_epochs',type=int, help='Batch size during training phase')
+    parser.add_argument('--num_stage_2_epochs',type=int, help='Batch size during training phase',default=None)
+    parser.add_argument('--pretrained_model_path',type=str, help='Path for pretrained model',default=None)
+    parser.add_argument('--clip_norm',type=float, help='Norm to which to clip gradients',default=1.0)
+    parser.add_argument('--lr',type=float, help='Stock value for learning rate',default=3e-4)
+    parser.add_argument('--save_path',type=str, help='Path where to save checkpoints',default='')
+
+    
+
+    args = parser.parse_args()
+    
     hparams={
-    'train_csv_file':'/home/ai01/Desktop/marin_work_folder/train_code/metadata_new_train_set.csv',
-    'train_csv_file_stage2': '/home/ai01/Desktop/marin_work_folder/train_code/train_code/metadata_second_stage_train_set.csv',
-    'test_csv_file': '/home/ai01/Desktop/marin_work_folder/train_code/metadata_test_clean.csv',
-    'batch_size':256,
-    'num_stage_1_epochs':10,
-    'num_stage_2_epochs':2,
-    'num_devices': world_size,
-    'load_pretrained': True,
-    'pretrained_model_path': 'checkpoints/new_gen_9_trial1.pt',
-    'clip_norm': 1.0,
+    'train_csv_file':args.train_csv_file,
+    'train_csv_file_stage2': args.train_csv_file_stage2,
+    'test_csv_file': args.test_csv_file,
+    'batch_size':args.batch_size,
+    'num_stage_1_epochs':args.num_stage_1_epochs,
+    'num_stage_2_epochs':args.num_stage_2_epochs,
+    'num_devices': args.ngpu,
+    'pretrained_model_path': args.pretrained_model_path,
+    'clip_norm': args.clip_norm,
+    'lr': args.lr,
+    'save_path':args.save_path,
     }
     
-    mp.spawn(main,args=(world_size,hparams),nprocs=world_size)
+    mp.spawn(main,args=(args.ngpu,hparams),nprocs=args.ngpu)
