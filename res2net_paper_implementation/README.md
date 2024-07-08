@@ -72,4 +72,5 @@ python train_M1.py \
   --use_version_1 True
 ```
 
+Make sure you set master address and port correctly inside training script
 
