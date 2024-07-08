@@ -6,7 +6,6 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
-from resnet_small import se_res2net50_v1b_non_chunked as resnet50
 import torch.nn.functional as F
 import tqdm
 import random
@@ -261,8 +260,13 @@ def trainer(rank, world_size,hparams):
 
     torch.set_float32_matmul_precision('high')
 
-    model_slow = resnet50(num_classes=1, in_channels=1)
-    
+    if hparams['use_version_1']:
+        from models.se_res2net_1 import se_res2net50_1
+        model_slow = se_res2net50_1(num_classes=1, in_channels=1)
+    else:
+        from models.se_res2net_2 import se_res2net50_2
+        model_slow = se_res2net50_2(num_classes=1, in_channels=1)
+
     if hparams['pretrained_model_path']:
         state_dict = torch.load(hparams['pretrained_model_path']) # this should be loaded to CUDA:0 by default and but it does not matter since we transfer it to 'rank' device later on.
         model_slow.load_state_dict(state_dict)
@@ -342,6 +346,7 @@ if __name__=="__main__":
     parser.add_argument('--clip_norm',type=float, help='Norm to which to clip gradients',default=1.0)
     parser.add_argument('--lr',type=float, help='Stock value for learning rate',default=3e-4)
     parser.add_argument('--save_path',type=str, help='Path where to save checkpoints',default='')
+    parser.add_argument('--use_version_1',type=bool, help='Version 1 is bigger model, same as in paper',default=False)
 
     
 
@@ -359,6 +364,7 @@ if __name__=="__main__":
     'clip_norm': args.clip_norm,
     'lr': args.lr,
     'save_path':args.save_path,
+    'use_version_1':args.use_version_1,
     }
     
     mp.spawn(main,args=(args.ngpu,hparams),nprocs=args.ngpu)
