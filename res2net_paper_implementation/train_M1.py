@@ -6,7 +6,6 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
-from resnet_small import se_res2net50_v1b_non_chunked as resnet50
 import torch.nn.functional as F
 import tqdm
 import random
@@ -17,51 +16,106 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed import init_process_group,destroy_process_group
+import argparse
+import sys
 
 
-# DDP config
+# -----------------------------------------------------
+# Setting up ddp
 def ddp_setup(rank, world_size):
-    os.environ["MASTER_ADDR"]= "172.16.170.6"
-    os.environ["MASTER_PORT"]= "65521"
+    os.environ["MASTER_ADDR"]= ""
+    os.environ["MASTER_PORT"]= ""
     init_process_group(backend="nccl",rank=rank,world_size=world_size)
 
 
 
+
+
+
+# ------------------------------------------------------
+# Preprocessing steps
 def set_random_rows_to_zero(image_tensor, max_consecutive_rows):
     height, width = image_tensor.shape[0], image_tensor.shape[1]
-    num_rows = random.randint(0, max_consecutive_rows)  # Randomly select the number of consecutive rows to set to zero
-    start_row = random.randint(0, height - num_rows - 1)  # Randomly select the starting row index
-
-    # Set the selected consecutive rows to zero
-    image_tensor[ start_row:start_row + num_rows, :] = 0
+    # Handle case where the height is less than the max consecutive rows
+    if height <= max_consecutive_rows:
+        num_rows = height  # Use the entire height if it's less than or equal to max rows
+    else:
+        num_rows = random.randint(0, max_consecutive_rows)
+    
+    if num_rows > 0:  # Only modify the tensor if num_rows is greater than zero
+        start_row = random.randint(0, height - num_rows)
+        image_tensor[start_row:start_row + num_rows, :] = 0
 
     return image_tensor
 
 def set_random_columns_to_zero(image_tensor, max_consecutive_columns):
-
     height, width = image_tensor.shape[0], image_tensor.shape[1]
-    num_columns = random.randint(0, max_consecutive_columns)  # Randomly select the number of consecutive columns to set to zero
-    start_column = random.randint(0, width - num_columns - 1)  # Randomly select the starting column index
-
-    # Set the selected consecutive columns to zero
-    image_tensor[ :, start_column:start_column + num_columns] = 0
+    # Handle case where the width is less than the max consecutive columns
+    if width <= max_consecutive_columns:
+        num_columns = width  # Use the entire width if it's less than or equal to max columns
+    else:
+        num_columns = random.randint(0, max_consecutive_columns)
+    
+    if num_columns > 0:  # Only modify the tensor if num_columns is greater than zero
+        start_column = random.randint(0, width - num_columns)
+        image_tensor[:, start_column:start_column + num_columns] = 0
 
     return image_tensor
 
-
-def apply_spectral_augment(image,num):
-    if num==1:
-        aug_image=set_random_rows_to_zero(image, 20) #20 rows <-- frequency domain
+def apply_spectral_augment(image, num):
+    if num == 1:
+        aug_image = set_random_rows_to_zero(image, 20)  # 20 rows in the frequency domain
         return aug_image
-    elif num==2:
-        aug_image=set_random_columns_to_zero(image, 30) #30 columns <--time domain
+    elif num == 2:
+        aug_image = set_random_columns_to_zero(image, 30)  # 30 columns in the time domain
         return aug_image
     else:
-        aug_image1=set_random_rows_to_zero(image, 20)
-        aug_image=set_random_columns_to_zero(aug_image1, 30)
+        aug_image1 = set_random_rows_to_zero(image, 20)
+        aug_image = set_random_columns_to_zero(aug_image1, 30)
         return aug_image
 
 
+def pad_feats(mel_spec, pad_amount):
+    """
+    Pads the mel spectrogram to a maximum length with a given pad value.
+
+    Args:
+    mel_spec (np.array): The mel spectrogram array (time x features).
+    max_length (int): The maximum length to pad the array.
+    pad_value (float, optional): The value used for padding. Defaults to 0.
+
+    Returns:
+    np.array: Padded mel spectrogram.
+    """
+    # Calculate the amount of padding needed
+    padding_pattern = (0, pad_amount)
+    pad_value=0
+    adjusted_tensor = torch.nn.functional.pad(mel_spec, padding_pattern, value=pad_value)
+
+
+    return adjusted_tensor
+
+
+def test_file(feats,model,threshold=0.5):
+    start_frame=0
+    end_frame=feats.shape[3]
+    probs=[]
+    #print(end_frame)
+    if end_frame<121:
+        #pad to 121
+        feats = pad_feats(feats,121-end_frame)
+        end_frame=121
+    while start_frame+121<=end_frame:
+        chunk=feats[:,:,:,start_frame:start_frame+121] # 1.2 seconds WINDOW size
+        #print(chunk.shape)
+        start_frame+=20 #Step size is 0.2 seconds ~ 20 frames
+        with torch.no_grad():
+            probs.append(torch.sigmoid(model( chunk)))
+    out_prob = torch.mean( torch.tensor(probs) )
+    if out_prob>threshold:
+        return 1
+    else:
+        return 0
 
 def compute_mel_spectrogram(audio_path,mel_spectrogram,amplitude_to_db,   n_mels=256, sr=16000):
     """
@@ -118,10 +172,6 @@ def compute_mel_spectrogram_aug(audio_path,mel_spectrogram,amplitude_to_db,   n_
     aug_mel = apply_spectral_augment(mel_spec_transformed,num)
     return aug_mel
 
-    
-
-
-
 class AudioDataset(Dataset):
     def __init__(self, csv_file,device='cuda', transform=None):
         """
@@ -151,52 +201,6 @@ class AudioDataset(Dataset):
 
         return LogMel, label
 
-
-import numpy as np
-
-def pad_feats(mel_spec, pad_amount):
-    """
-    Pads the mel spectrogram to a maximum length with a given pad value.
-
-    Args:
-    mel_spec (np.array): The mel spectrogram array (time x features).
-    max_length (int): The maximum length to pad the array.
-    pad_value (float, optional): The value used for padding. Defaults to 0.
-
-    Returns:
-    np.array: Padded mel spectrogram.
-    """
-    # Calculate the amount of padding needed
-    padding_pattern = (0, pad_amount)
-    pad_value=0
-    adjusted_tensor = torch.nn.functional.pad(mel_spec, padding_pattern, value=pad_value)
-
-
-    return adjusted_tensor
-
-
-def test_file(feats,model,threshold=0.5):
-    start_frame=0
-    end_frame=feats.shape[3]
-    probs=[]
-    #print(end_frame)
-    if end_frame<121:
-        #pad to 121
-        feats = pad_feats(feats,121-end_frame)
-        end_frame=121
-    while start_frame+121<=end_frame:
-        chunk=feats[:,:,:,start_frame:start_frame+121] # 1.2 seconds WINDOW size
-        #print(chunk.shape)
-        start_frame+=20 #Step size is 0.2 seconds ~ 20 frames
-        probs.append(torch.sigmoid(model( chunk)))
-    out_prob = torch.mean( torch.tensor(probs) )
-    if out_prob>threshold:
-        return 1
-    else:
-        return 0
-
-
-import tqdm
 def compute_accuracy(outputs, labels, threshold=0.5):
     """
     Compute accuracy given model outputs and ground truth labels.
@@ -213,6 +217,9 @@ def compute_accuracy(outputs, labels, threshold=0.5):
     correct = (preds == labels).type(torch.float32)  # Convert boolean to float
     #print(correct.size())
     return correct.sum()   # Return number of correct classifications
+
+
+
 
 
 def train_one_epoch(model,loss_function,scheduler,optimizer,train_loader,hparams,device):
@@ -262,7 +269,6 @@ def valid_one_epoch(model,loss_function,valid_loader,hparams,device):
     #print(f'Validation Accuracy: {average_accuracy:.2f}')    
     return valid_loss/len(valid_loader) ,average_accuracy
 
-
 def test_one_epoch(model,test_loader,hparams):
     test_acc=0
     device= hparams['device']
@@ -276,9 +282,6 @@ def test_one_epoch(model,test_loader,hparams):
             total_num_correct+=1
     return total_num_correct/i
 
-
-
-
 def trainer(rank, world_size,hparams):
     dist.barrier() # sync all devices here
     csv_file = hparams['train_csv_file']
@@ -289,22 +292,28 @@ def trainer(rank, world_size,hparams):
     torch.manual_seed(42)
     file = pd.read_csv(csv_file)
     test_file=pd.read_csv(testing_csv_file)
-    trainstage2_file = pd.read_csv(csv_file_stage2)
-    train_dataset = AudioDataset(csv_file=file[file['split']=='train'],device=device,transform=compute_mel_spectrogram_aug)
-    train_dataset_stage2 = AudioDataset(csv_file=trainstage2_file[trainstage2_file['split']=='train'],device=device,transform=compute_mel_spectrogram)
+    if csv_file_stage2:
+        trainstage2_file = pd.read_csv(csv_file_stage2)
+        train_dataset_stage2 = AudioDataset(csv_file=trainstage2_file[trainstage2_file['split']=='train'],device=device,transform=compute_mel_spectrogram)
+        train_loader_stage2 = DataLoader(train_dataset_stage2, batch_size=hparams['batch_size'], shuffle=False,num_workers=4,sampler=DistributedSampler(train_dataset_stage2),drop_last=True)
 
+    train_dataset = AudioDataset(csv_file=file[file['split']=='train'],device=device,transform=compute_mel_spectrogram_aug)
     valid_dataset = AudioDataset(csv_file=file[file['split']=='valid'].reset_index(drop=True),device=device,transform=compute_mel_spectrogram)
     test_dataset = AudioDataset(csv_file=test_file,device=device,transform=compute_mel_spectrogram)
     train_loader = DataLoader(train_dataset, batch_size=hparams['batch_size'], shuffle=False,num_workers=4,sampler=DistributedSampler(train_dataset),drop_last=True)
-    train_loader_stage2 = DataLoader(train_dataset_stage2, batch_size=hparams['batch_size'], shuffle=False,num_workers=4,sampler=DistributedSampler(train_dataset_stage2),drop_last=True)
     valid_loader = DataLoader(valid_dataset, batch_size=hparams['batch_size'], shuffle=False,drop_last=False)
     test_loader = DataLoader(test_dataset, batch_size=hparams['batch_size'], shuffle=False,drop_last=False)
 
     torch.set_float32_matmul_precision('high')
 
-    model_slow = resnet50(num_classes=1, in_channels=1)
-    
-    if hparams['load_pretrained']==True:
+    if hparams['use_version_1']:
+        from models.se_res2net_1 import se_res2net50_1
+        model_slow = se_res2net50_1(num_classes=1, in_channels=1)
+    else:
+        from models.se_res2net_2 import se_res2net50_2
+        model_slow = se_res2net50_2(num_classes=1, in_channels=1)
+
+    if hparams['pretrained_model_path']:
         state_dict = torch.load(hparams['pretrained_model_path']) # this should be loaded to CUDA:0 by default and but it does not matter since we transfer it to 'rank' device later on.
         model_slow.load_state_dict(state_dict)
     
@@ -321,7 +330,7 @@ def trainer(rank, world_size,hparams):
     ddp_mp_model = DDP(ddp_mp_model, device_ids=[rank])
     
     # Optimizer config
-    optimizer = optim.Adam(ddp_mp_model.parameters(), lr=3e-4)
+    optimizer = optim.Adam(ddp_mp_model.parameters(), lr=hparams['lr'])
     lambda1 = lambda epoch: 0.65 ** epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
@@ -336,32 +345,32 @@ def trainer(rank, world_size,hparams):
         
         train_loss=train_one_epoch(ddp_mp_model,loss_function,scheduler,optimizer,train_loader,hparams,device)
         valid_loss,valid_acc = valid_one_epoch(ddp_mp_model,loss_function,valid_loader,hparams,device)
-        _,test_acc = valid_one_epoch(ddp_mp_model,loss_function,test_loader,hparams,device)
+        test_acc = test_one_epoch(ddp_mp_model,loss_function,test_loader,hparams,device)
         if device==0:
             print(f'Validation Accuracy: {valid_acc:.2f}')
             print(f'Device: {device} Test Accuracy: {test_acc:.2f}')
             ckp = ddp_mp_model.module.state_dict()
-            torch.save(ckp, f'checkpoints/new_gen_{epoch+1}_trial1.pt')
-            print(f'Model saved for checkpoint:{epoch+1} at location checkpoints/new_gen_{epoch+1}_trial2.pt')
+            torch.save(ckp, f'{hparams["save_path"]}_{epoch+1}.pt')
+            print(f'Model saved for checkpoint:{epoch+1} at location {hparams["save_path"]}_{epoch+1}.pt')
             print(f'Train loss at epoch:{epoch+1} is: {train_loss}')
             print(f'Valid loss at epoch:{epoch+1} is: {valid_loss}')
             print('---------------------------------/-------------------------------------')
-
-    for epoch in range(hparams['num_stage_2_epochs']):
-        if device==0:
-            print("Initiating second stage of training")
-        train_loss_stage2=train_one_epoch(ddp_mp_model,loss_function,scheduler,optimizer,train_loader_stage2,hparams,device)
-        valid_loss,valid_acc = valid_one_epoch(ddp_mp_model,loss_function,valid_loader,hparams,device)
-        _,test_acc = valid_one_epoch(ddp_mp_model,loss_function,test_loader,hparams,device)
-        if device==0: # We perform validation and testing only on one gpu so as to have unambiguous results.
-            print(f'Validation Accuracy: {valid_acc:.2f}')
-            print(f'Test Accuracy: {test_acc:.2f}')
-            ckp = ddp_mp_model.module.state_dict()
-            torch.save(ckp, f'checkpoints/new_gen_{hparams["num_stage_1_epochs"]+epoch}_trial2.pt')
-            print(f'Model saved for checkpoint:{hparams["num_stage_1_epochs"]+epoch} at location checkpoints/new_gen_{hparams["num_stage_1_epochs"]+epoch}_trial1.pt')
-            print(f'Train loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {train_loss_stage2}')
-            print(f'Valid loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {valid_loss}')
-            print('---------------------------------/-------------------------------------')
+    if csv_file_stage2:
+        for epoch in range(hparams['num_stage_2_epochs']):
+            if device==0:
+                print("Initiating second stage of training")
+            train_loss_stage2=train_one_epoch(ddp_mp_model,loss_function,scheduler,optimizer,train_loader_stage2,hparams,device)
+            valid_loss,valid_acc = valid_one_epoch(ddp_mp_model,loss_function,valid_loader,hparams,device)
+            test_acc = test_one_epoch(ddp_mp_model,test_loader,hparams,device)
+            if device==0: # We perform validation and testing only on one gpu so as to have unambiguous results.
+                print(f'Validation Accuracy: {valid_acc:.2f}')
+                print(f'Test Accuracy: {test_acc:.2f}')
+                ckp = ddp_mp_model.module.state_dict()
+                torch.save(ckp, f'{hparams["save_path"]}_{hparams["num_stage_1_epochs"]+epoch}.pt')
+                print(f'Model saved for checkpoint:{hparams["num_stage_1_epochs"]+epoch} at location {hparams["save_path"]}_{hparams["num_stage_1_epochs"]+epoch}.pt')
+                print(f'Train loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {train_loss_stage2}')
+                print(f'Valid loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {valid_loss}')
+                print('---------------------------------/-------------------------------------')
 
 
 
@@ -371,19 +380,37 @@ def main(rank: int, world_size: int, hparams: dict):
     destroy_process_group()
 
 if __name__=="__main__":
-    import sys
-    world_size  = torch.cuda.device_count()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train_csv_file',type=str, help='Metadata for training set first stage')
+    parser.add_argument('--train_csv_file_stage2',type=str, help='Metadata for training set second stage',default=None)
+    parser.add_argument('--test_csv_file',type=str, help='Metadata for testing set')
+    parser.add_argument('--ngpu',type=int, help='Number of graphical units to use',default=1)
+    parser.add_argument('--batch_size',type=int, help='Batch size during training phase',default=256)
+    parser.add_argument('--num_stage_1_epochs',type=int, help='Batch size during training phase')
+    parser.add_argument('--num_stage_2_epochs',type=int, help='Batch size during training phase',default=None)
+    parser.add_argument('--pretrained_model_path',type=str, help='Path for pretrained model',default=None)
+    parser.add_argument('--clip_norm',type=float, help='Norm to which to clip gradients',default=1.0)
+    parser.add_argument('--lr',type=float, help='Stock value for learning rate',default=3e-4)
+    parser.add_argument('--save_path',type=str, help='Path where to save checkpoints',default='')
+    parser.add_argument('--use_version_1',type=bool, help='Version 1 is bigger model, same as in paper',default=False)
+
+    
+
+    args = parser.parse_args()
+    
     hparams={
-    'train_csv_file':'',
-    'train_csv_file_stage2': '',
-    'test_csv_file': '',
-    'batch_size':256,
-    'num_stage_1_epochs':10,
-    'num_stage_2_epochs':2,
-    'num_devices': world_size,
-    'load_pretrained': True,
-    'pretrained_model_path': '',
-    'clip_norm': 1.0,
+    'train_csv_file':args.train_csv_file,
+    'train_csv_file_stage2': args.train_csv_file_stage2,
+    'test_csv_file': args.test_csv_file,
+    'batch_size':args.batch_size,
+    'num_stage_1_epochs':args.num_stage_1_epochs,
+    'num_stage_2_epochs':args.num_stage_2_epochs,
+    'num_devices': args.ngpu,
+    'pretrained_model_path': args.pretrained_model_path,
+    'clip_norm': args.clip_norm,
+    'lr': args.lr,
+    'save_path':args.save_path,
+    'use_version_1':args.use_version_1,
     }
     
-    mp.spawn(main,args=(world_size,hparams),nprocs=world_size)
+    mp.spawn(main,args=(args.ngpu,hparams),nprocs=args.ngpu)
