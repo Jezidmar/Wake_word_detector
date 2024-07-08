@@ -247,14 +247,15 @@ def trainer(rank, world_size,hparams):
     torch.manual_seed(42)
     file = pd.read_csv(csv_file)
     test_file=pd.read_csv(testing_csv_file)
-    trainstage2_file = pd.read_csv(csv_file_stage2)
-    train_dataset = AudioDataset(csv_file=file[file['split']=='train'],device=device,transform=compute_mel_spectrogram_aug)
-    train_dataset_stage2 = AudioDataset(csv_file=trainstage2_file[trainstage2_file['split']=='train'],device=device,transform=compute_mel_spectrogram)
+    if csv_file_stage2:
+        trainstage2_file = pd.read_csv(csv_file_stage2)
+        train_dataset_stage2 = AudioDataset(csv_file=trainstage2_file[trainstage2_file['split']=='train'],device=device,transform=compute_mel_spectrogram)
+        train_loader_stage2 = DataLoader(train_dataset_stage2, batch_size=hparams['batch_size'], shuffle=False,num_workers=4,sampler=DistributedSampler(train_dataset_stage2),drop_last=True)
 
+    train_dataset = AudioDataset(csv_file=file[file['split']=='train'],device=device,transform=compute_mel_spectrogram_aug)
     valid_dataset = AudioDataset(csv_file=file[file['split']=='valid'].reset_index(drop=True),device=device,transform=compute_mel_spectrogram)
     test_dataset = AudioDataset(csv_file=test_file,device=device,transform=compute_mel_spectrogram)
     train_loader = DataLoader(train_dataset, batch_size=hparams['batch_size'], shuffle=False,num_workers=4,sampler=DistributedSampler(train_dataset),drop_last=True)
-    train_loader_stage2 = DataLoader(train_dataset_stage2, batch_size=hparams['batch_size'], shuffle=False,num_workers=4,sampler=DistributedSampler(train_dataset_stage2),drop_last=True)
     valid_loader = DataLoader(valid_dataset, batch_size=hparams['batch_size'], shuffle=False,drop_last=False)
     test_loader = DataLoader(test_dataset, batch_size=hparams['batch_size'], shuffle=False,drop_last=False)
 
@@ -299,27 +300,27 @@ def trainer(rank, world_size,hparams):
             print(f'Validation Accuracy: {valid_acc:.2f}')
             print(f'Device: {device} Test Accuracy: {test_acc:.2f}')
             ckp = ddp_mp_model.module.state_dict()
-            torch.save(ckp, f'checkpoints/new_gen_{epoch+1}_trial1.pt')
-            print(f'Model saved for checkpoint:{epoch+1} at location checkpoints/new_gen_{epoch+1}_trial2.pt')
+            torch.save(ckp, f'{hparams["save_path"]}_{epoch+1}.pt')
+            print(f'Model saved for checkpoint:{epoch+1} at location {hparams["save_path"]}_{epoch+1}.pt')
             print(f'Train loss at epoch:{epoch+1} is: {train_loss}')
             print(f'Valid loss at epoch:{epoch+1} is: {valid_loss}')
             print('---------------------------------/-------------------------------------')
-
-    for epoch in range(hparams['num_stage_2_epochs']):
-        if device==0:
-            print("Initiating second stage of training")
-        train_loss_stage2=train_one_epoch(ddp_mp_model,loss_function,scheduler,optimizer,train_loader_stage2,hparams,device)
-        valid_loss,valid_acc = valid_one_epoch(ddp_mp_model,loss_function,valid_loader,hparams,device)
-        _,test_acc = valid_one_epoch(ddp_mp_model,loss_function,test_loader,hparams,device)
-        if device==0: # We perform validation and testing only on one gpu so as to have unambiguous results.
-            print(f'Validation Accuracy: {valid_acc:.2f}')
-            print(f'Test Accuracy: {test_acc:.2f}')
-            ckp = ddp_mp_model.module.state_dict()
-            torch.save(ckp, f'checkpoints/new_gen_{hparams["num_stage_1_epochs"]+epoch}_trial2.pt')
-            print(f'Model saved for checkpoint:{hparams["num_stage_1_epochs"]+epoch} at location checkpoints/new_gen_{hparams["num_stage_1_epochs"]+epoch}_trial1.pt')
-            print(f'Train loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {train_loss_stage2}')
-            print(f'Valid loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {valid_loss}')
-            print('---------------------------------/-------------------------------------')
+    if csv_file_stage2:
+        for epoch in range(hparams['num_stage_2_epochs']):
+            if device==0:
+                print("Initiating second stage of training")
+            train_loss_stage2=train_one_epoch(ddp_mp_model,loss_function,scheduler,optimizer,train_loader_stage2,hparams,device)
+            valid_loss,valid_acc = valid_one_epoch(ddp_mp_model,loss_function,valid_loader,hparams,device)
+            _,test_acc = valid_one_epoch(ddp_mp_model,loss_function,test_loader,hparams,device)
+            if device==0: # We perform validation and testing only on one gpu so as to have unambiguous results.
+                print(f'Validation Accuracy: {valid_acc:.2f}')
+                print(f'Test Accuracy: {test_acc:.2f}')
+                ckp = ddp_mp_model.module.state_dict()
+                torch.save(ckp, f'{hparams["save_path"]}_{hparams["num_stage_1_epochs"]+epoch}.pt')
+                print(f'Model saved for checkpoint:{hparams["num_stage_1_epochs"]+epoch} at location {hparams["save_path"]}_{hparams["num_stage_1_epochs"]+epoch}.pt')
+                print(f'Train loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {train_loss_stage2}')
+                print(f'Valid loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {valid_loss}')
+                print('---------------------------------/-------------------------------------')
 
 
 
@@ -331,10 +332,10 @@ def main(rank: int, world_size: int, hparams: dict):
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_csv_file',type=str, help='Metadata for training set first stage')
-    parser.add_argument('--train_csv_file_stage2',type=str, help='Metadata for training set second stage')
+    parser.add_argument('--train_csv_file_stage2',type=str, help='Metadata for training set second stage',default=None)
     parser.add_argument('--test_csv_file',type=str, help='Metadata for testing set')
-    parser.add_argument('--ngpu',type=int, help='Number of graphical units to use')
-    parser.add_argument('--batch_size',type=int, help='Batch size during training phase')
+    parser.add_argument('--ngpu',type=int, help='Number of graphical units to use',default=1)
+    parser.add_argument('--batch_size',type=int, help='Batch size during training phase',default=256)
     parser.add_argument('--num_stage_1_epochs',type=int, help='Batch size during training phase')
     parser.add_argument('--num_stage_2_epochs',type=int, help='Batch size during training phase',default=None)
     parser.add_argument('--pretrained_model_path',type=str, help='Path for pretrained model',default=None)
