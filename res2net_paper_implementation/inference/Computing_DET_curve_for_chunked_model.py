@@ -1,23 +1,9 @@
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torchaudio.transforms import Resample
 import torchaudio
-import librosa
-import cv2
-import torch.nn as nn
-import torch.optim as optim
-import matplotlib.pyplot as plt
-import torch.nn.functional as F
-import random
 import numpy as np
-import librosa
-import logging
-import soundfile
-import torch.nn.functional as F
-import csv
 import tqdm
-from model_res2net50_v1b import res2net50_v1b as resnet50
 
 
 def compute_mel_spectrogram(audio_path,mel_spectrogram,amplitude_to_db,   n_mels=256, sr=16000):
@@ -97,7 +83,6 @@ def test_file(feats,model,threshold=0.5):
     else:
         return 0
 
-import numpy as np
 
 def pad_feats(mel_spec, pad_amount):
     """
