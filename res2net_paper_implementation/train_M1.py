@@ -1,6 +1,5 @@
 import argparse
 import os
-import random
 import time
 
 import pandas as pd
@@ -10,8 +9,11 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
 import torchaudio
-import torchvision.transforms as transforms
 import tqdm
+from data.tools.extract_feats import (
+    compute_mel_spectrogram,
+    compute_mel_spectrogram_aug,
+)
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
@@ -24,59 +26,6 @@ def ddp_setup(rank, world_size):
     os.environ["MASTER_ADDR"] = ""
     os.environ["MASTER_PORT"] = ""
     init_process_group(backend="nccl", rank=rank, world_size=world_size)
-
-
-# ------------------------------------------------------
-# Preprocessing steps
-def set_random_rows_to_zero(image_tensor, max_consecutive_rows):
-    height, width = image_tensor.shape[0], image_tensor.shape[1]
-    # Handle case where the height is less than the max consecutive rows
-    if height <= max_consecutive_rows:
-        num_rows = (
-            height  # Use the entire height if it's less than or equal to max rows
-        )
-    else:
-        num_rows = random.randint(0, max_consecutive_rows)
-
-    if num_rows > 0:  # Only modify the tensor if num_rows is greater than zero
-        start_row = random.randint(0, height - num_rows)
-        image_tensor[start_row : start_row + num_rows, :] = 0
-
-    return image_tensor
-
-
-def set_random_columns_to_zero(image_tensor, max_consecutive_columns):
-    height, width = image_tensor.shape[0], image_tensor.shape[1]
-    # Handle case where the width is less than the max consecutive columns
-    if width <= max_consecutive_columns:
-        num_columns = (
-            width  # Use the entire width if it's less than or equal to max columns
-        )
-    else:
-        num_columns = random.randint(0, max_consecutive_columns)
-
-    if num_columns > 0:  # Only modify the tensor if num_columns is greater than zero
-        start_column = random.randint(0, width - num_columns)
-        image_tensor[:, start_column : start_column + num_columns] = 0
-
-    return image_tensor
-
-
-def apply_spectral_augment(image, num):
-    if num == 1:
-        aug_image = set_random_rows_to_zero(
-            image, 20
-        )  # 20 rows in the frequency domain
-        return aug_image
-    elif num == 2:
-        aug_image = set_random_columns_to_zero(
-            image, 30
-        )  # 30 columns in the time domain
-        return aug_image
-    else:
-        aug_image1 = set_random_rows_to_zero(image, 20)
-        aug_image = set_random_columns_to_zero(aug_image1, 30)
-        return aug_image
 
 
 def pad_feats(mel_spec, pad_amount):
@@ -123,68 +72,6 @@ def test_file(feats, model, threshold=0.5):
         return 1
     else:
         return 0
-
-
-def compute_mel_spectrogram(
-    audio_path, mel_spectrogram, amplitude_to_db, n_mels=256, sr=16000
-):
-    """
-    Compute a Mel spectrogram for an audio file.
-
-    Args:
-    audio_path (str): Path to the audio file.
-    n_fft (int): Number of FFT components.
-    hop_length (int): Number of samples between successive frames.
-    n_mels (int): Number of Mel bands to generate.
-    sr (int): Sampling rate of the audio file.
-
-    Returns:
-    S_DB (np.array): Log-scaled Mel spectrogram.
-    """
-    # Load the audio file
-    waveform, _ = torchaudio.load(audio_path)
-    mel_spec = mel_spectrogram(waveform)
-    mel_spec_db = amplitude_to_db(mel_spec)
-    transform = (
-        transforms.Normalize(mean=[mel_spec_db.mean()], std=[mel_spec_db.std() + 1e-8]),
-    )
-
-    mel_spec_transformed = transform(mel_spec_db)
-
-    return mel_spec_transformed
-
-
-def compute_mel_spectrogram_aug(
-    audio_path, mel_spectrogram, amplitude_to_db, n_mels=256, sr=16000
-):
-    """
-    Compute a Mel spectrogram for an audio file.
-
-    Args:
-    audio_path (str): Path to the audio file.
-    n_fft (int): Number of FFT components.
-    hop_length (int): Number of samples between successive frames.
-    n_mels (int): Number of Mel bands to generate.
-    sr (int): Sampling rate of the audio file.
-
-    Returns:
-    S_DB (np.array): Log-scaled Mel spectrogram.
-    """
-    # Load the audio file
-
-    waveform, _ = torchaudio.load(audio_path)
-    waveform = waveform
-    mel_spec = mel_spectrogram(waveform)
-    mel_spec_db = amplitude_to_db(mel_spec)
-    transform = (
-        transforms.Normalize(mean=[mel_spec_db.mean()], std=[mel_spec_db.std() + 1e-8]),
-    )  # Clamp standard deviation
-
-    mel_spec_transformed = transform(mel_spec_db)
-
-    num = random.randint(1, 3)
-    aug_mel = apply_spectral_augment(mel_spec_transformed, num)
-    return aug_mel
 
 
 class AudioDataset(Dataset):
@@ -236,7 +123,7 @@ def compute_accuracy(outputs, labels, threshold=0.5):
 
 
 def train_one_epoch(
-    model, loss_function, scheduler, optimizer, train_loader, hparams, device
+    model, loss_function, scheduler, optimizer, train_loader, args, device
 ):
     train_loss = 0
     model.train()
@@ -251,7 +138,7 @@ def train_one_epoch(
             labels = labels.to(device)
             loss = loss_function(torch.squeeze(outputs), labels)
         loss.backward()
-        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), hparams["clip_norm"])
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
         optimizer.step()
         train_loss += loss.cpu().item()
         torch.cuda.synchronize()
@@ -259,14 +146,14 @@ def train_one_epoch(
 
         if device == 0 and i % 100 == 0:
             print(
-                f"Batch size: {hparams['batch_size']} | step/total_steps: {i//hparams['num_devices']} / {len(train_loader)//hparams['num_devices']} | loss: {loss.cpu().item():.6f} | dt: {(t1-t0)*1000:.2f}ms | norm: {norm:.4f} | lr: {optimizer.param_groups[0]['lr']}"
+                f"Batch size: {args.batch_size} | step/total_steps: {i//args.num_devices} / {len(train_loader)//args.num_devices} | loss: {loss.cpu().item():.6f} | dt: {(t1-t0)*1000:.2f}ms | norm: {norm:.4f} | lr: {optimizer.param_groups[0]['lr']}"
             )
         torch.cuda.empty_cache()
     scheduler.step()
     return train_loss / len(train_loader)
 
 
-def valid_one_epoch(model, loss_function, valid_loader, hparams, device):
+def valid_one_epoch(model, loss_function, valid_loader, args, device):
     valid_loss = 0
     total_num_correct = 0
     model.eval()
@@ -285,14 +172,13 @@ def valid_one_epoch(model, loss_function, valid_loader, hparams, device):
         )
         total_num_correct += batch_num_correct
         valid_loss += loss.cpu().item()
-    average_accuracy = total_num_correct / ((i + 1) * hparams["batch_size"])
+    average_accuracy = total_num_correct / ((i + 1) * args.batch_size)
     # print(f'Validation Accuracy: {average_accuracy:.2f}')
     return valid_loss / len(valid_loader), average_accuracy
 
 
-def test_one_epoch(model, test_loader, hparams):
-    test_acc = 0
-    device = hparams["device"]
+def test_one_epoch(model, test_loader, args):
+    device = args.device
     model.eval()
     total_num_correct = 0
     for i, (feats, labels) in enumerate(test_loader):
@@ -304,11 +190,11 @@ def test_one_epoch(model, test_loader, hparams):
     return total_num_correct / i
 
 
-def trainer(rank, world_size, hparams):
+def trainer(rank, world_size, args):
     dist.barrier()  # sync all devices here
-    csv_file = hparams["train_csv_file"]
-    csv_file_stage2 = hparams["train_csv_file_stage2"]
-    testing_csv_file = hparams["test_csv_file"]
+    csv_file = args.train_csv_file
+    csv_file_stage2 = args.train_csv_file_stage2
+    testing_csv_file = args.test_csv_file
     device = rank
     torch.cuda.manual_seed(42)
     torch.manual_seed(42)
@@ -323,7 +209,7 @@ def trainer(rank, world_size, hparams):
         )
         train_loader_stage2 = DataLoader(
             train_dataset_stage2,
-            batch_size=hparams["batch_size"],
+            batch_size=args.batch_size,
             shuffle=False,
             num_workers=4,
             sampler=DistributedSampler(train_dataset_stage2),
@@ -345,22 +231,22 @@ def trainer(rank, world_size, hparams):
     )
     train_loader = DataLoader(
         train_dataset,
-        batch_size=hparams["batch_size"],
+        batch_size=args.batch_size,
         shuffle=False,
         num_workers=4,
         sampler=DistributedSampler(train_dataset),
         drop_last=True,
     )
     valid_loader = DataLoader(
-        valid_dataset, batch_size=hparams["batch_size"], shuffle=False, drop_last=False
+        valid_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=hparams["batch_size"], shuffle=False, drop_last=False
+        test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False
     )
 
     torch.set_float32_matmul_precision("high")
 
-    if hparams["use_version_1"]:
+    if args.use_version_1:
         from models.se_res2net_1 import se_res2net50_1
 
         model_slow = se_res2net50_1(num_classes=1, in_channels=1)
@@ -369,9 +255,9 @@ def trainer(rank, world_size, hparams):
 
         model_slow = se_res2net50_2(num_classes=1, in_channels=1)
 
-    if hparams["pretrained_model_path"]:
+    if args.pretrained_model_path:
         state_dict = torch.load(
-            hparams["pretrained_model_path"]
+            args.pretrained_model_path
         )  # this should be loaded to CUDA:0 by default and but it does not matter since we transfer it to 'rank' device later on.
         model_slow.load_state_dict(state_dict)
 
@@ -388,14 +274,14 @@ def trainer(rank, world_size, hparams):
     ddp_mp_model = DDP(ddp_mp_model, device_ids=[rank])
 
     # Optimizer config
-    optimizer = optim.Adam(ddp_mp_model.parameters(), lr=hparams["lr"])
+    optimizer = optim.Adam(ddp_mp_model.parameters(), lr=args.lr)
     lambda1 = lambda epoch: 0.65**epoch
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
     # Defining loss function
     loss_function = nn.BCEWithLogitsLoss()
 
-    for epoch in range(hparams["num_stage_1_epochs"]):
+    for epoch in range(args.num_stage_1_epochs):
         if device == 0:
             print("Initiating first stage of training")
 
@@ -405,22 +291,22 @@ def trainer(rank, world_size, hparams):
             scheduler,
             optimizer,
             train_loader,
-            hparams,
+            args,
             device,
         )
         valid_loss, valid_acc = valid_one_epoch(
-            ddp_mp_model, loss_function, valid_loader, hparams, device
+            ddp_mp_model, loss_function, valid_loader, args, device
         )
         test_acc = test_one_epoch(
-            ddp_mp_model, loss_function, test_loader, hparams, device
+            ddp_mp_model, loss_function, test_loader, args, device
         )
         if device == 0:
             print(f"Validation Accuracy: {valid_acc:.2f}")
             print(f"Device: {device} Test Accuracy: {test_acc:.2f}")
             ckp = ddp_mp_model.module.state_dict()
-            torch.save(ckp, f'{hparams["save_path"]}_{epoch+1}.pt')
+            torch.save(ckp, f"{args.save_path}_{epoch+1}.pt")
             print(
-                f'Model saved for checkpoint:{epoch+1} at location {hparams["save_path"]}_{epoch+1}.pt'
+                f"Model saved for checkpoint:{epoch+1} at location {args.save_path}_{epoch+1}.pt"
             )
             print(f"Train loss at epoch:{epoch+1} is: {train_loss}")
             print(f"Valid loss at epoch:{epoch+1} is: {valid_loss}")
@@ -428,7 +314,7 @@ def trainer(rank, world_size, hparams):
                 "---------------------------------/-------------------------------------"
             )
     if csv_file_stage2:
-        for epoch in range(hparams["num_stage_2_epochs"]):
+        for epoch in range(args.num_stage_2_epochs):
             if device == 0:
                 print("Initiating second stage of training")
             train_loss_stage2 = train_one_epoch(
@@ -437,13 +323,13 @@ def trainer(rank, world_size, hparams):
                 scheduler,
                 optimizer,
                 train_loader_stage2,
-                hparams,
+                args,
                 device,
             )
             valid_loss, valid_acc = valid_one_epoch(
-                ddp_mp_model, loss_function, valid_loader, hparams, device
+                ddp_mp_model, loss_function, valid_loader, args, device
             )
-            test_acc = test_one_epoch(ddp_mp_model, test_loader, hparams, device)
+            test_acc = test_one_epoch(ddp_mp_model, test_loader, args, device)
             if (
                 device == 0
             ):  # We perform validation and testing only on one gpu so as to have unambiguous results.
@@ -452,25 +338,25 @@ def trainer(rank, world_size, hparams):
                 ckp = ddp_mp_model.module.state_dict()
                 torch.save(
                     ckp,
-                    f'{hparams["save_path"]}_{hparams["num_stage_1_epochs"]+epoch}.pt',
+                    f"{args.save_path}_{args.num_stage_1_epochs+epoch}.pt",
                 )
                 print(
-                    f'Model saved for checkpoint:{hparams["num_stage_1_epochs"]+epoch} at location {hparams["save_path"]}_{hparams["num_stage_1_epochs"]+epoch}.pt'
+                    f"Model saved for checkpoint:{args.num_stage_1_epochs+epoch} at location {args.save_path}_{args.num_stage_1_epochs+epoch}.pt"
                 )
                 print(
-                    f'Train loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {train_loss_stage2}'
+                    f"Train loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {train_loss_stage2}"
                 )
                 print(
-                    f'Valid loss at epoch:{hparams["num_stage_1_epochs"]+epoch} of second stage is: {valid_loss}'
+                    f"Valid loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {valid_loss}"
                 )
                 print(
                     "---------------------------------/-------------------------------------"
                 )
 
 
-def main(rank: int, world_size: int, hparams: dict):
+def main(rank: int, world_size: int, args: dict):
     ddp_setup(rank, world_size)
-    trainer(rank, world_size, hparams)
+    trainer(rank, world_size, args)
     destroy_process_group()
 
 
@@ -525,19 +411,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    hparams = {
-        "train_csv_file": args.train_csv_file,
-        "train_csv_file_stage2": args.train_csv_file_stage2,
-        "test_csv_file": args.test_csv_file,
-        "batch_size": args.batch_size,
-        "num_stage_1_epochs": args.num_stage_1_epochs,
-        "num_stage_2_epochs": args.num_stage_2_epochs,
-        "num_devices": args.ngpu,
-        "pretrained_model_path": args.pretrained_model_path,
-        "clip_norm": args.clip_norm,
-        "lr": args.lr,
-        "save_path": args.save_path,
-        "use_version_1": args.use_version_1,
-    }
-
-    mp.spawn(main, args=(args.ngpu, hparams), nprocs=args.ngpu)
+    mp.spawn(main, args=(args.ngpu, args), nprocs=args.ngpu)
