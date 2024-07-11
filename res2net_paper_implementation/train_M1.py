@@ -159,9 +159,7 @@ def valid_one_epoch(model, loss_function, valid_loader, args, device):
     model.eval()
     for i, (feats, labels) in tqdm.tqdm(enumerate(valid_loader)):
         # Your training process here
-        # print(f"{i} and label is {labels} ")
         features = feats.to(device)
-        # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         with torch.no_grad():
             outputs = model(features)
         labels = labels.float()
@@ -184,7 +182,6 @@ def test_one_epoch(model, test_loader, args):
     for i, (feats, labels) in enumerate(test_loader):
         features = feats.unsqueeze(1).to(device)
         pred = test_file(features, model)
-        # print(f"If {pred} and {torch.squeeze(labels)}, then {pred==torch.squeeze(labels)}")
         if pred == torch.squeeze(labels):
             total_num_correct += 1
     return total_num_correct / i
