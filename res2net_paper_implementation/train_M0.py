@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torchaudio
 import tqdm
+import wandb
 from data.tools.extract_feats import (
     compute_mel_spectrogram,
     compute_mel_spectrogram_aug,
@@ -102,6 +103,7 @@ def train_one_epoch(
             print(
                 f"Batch size: {args.batch_size} | step/total_steps: {i//args.num_devices} / {len(train_loader)//args.num_devices} | loss: {loss.cpu().item():.6f} | dt: {(t1-t0)*1000:.2f}ms | norm: {norm:.4f} | lr: {optimizer.param_groups[0]['lr']}"
             )
+            # TODO wandb.log({"loss": loss.cpu().item(), "step_time/ms": (t1-t0)*1000, "gradient_norm": norm, "lr":optimizer.param_groups[0]['lr'] })
         torch.cuda.empty_cache()
     scheduler.step()
     return train_loss / len(train_loader)
@@ -112,10 +114,7 @@ def valid_one_epoch(model, loss_function, valid_loader, args, device):
     total_num_correct = 0
     model.eval()
     for i, (feats, labels) in tqdm.tqdm(enumerate(valid_loader)):
-        # Your training process here
-        # print(f"{i} and label is {labels} ")
         features = feats.to(device)
-        # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         with torch.no_grad():
             outputs = model(features)
         labels = labels.float()
@@ -254,11 +253,19 @@ def trainer(rank, world_size, args):
             print(
                 "---------------------------------/-------------------------------------"
             )
+            wandb.log(
+                {
+                    "validation_Accuracy": valid_acc,
+                    "test_accuracy": test_acc,
+                    "train_loss": train_loss,
+                    "valid_loss": valid_loss,
+                }
+            )
     if csv_file_stage2:
         for epoch in range(args.num_stage_2_epochs):
             if device == 0:
                 print("Initiating second stage of training")
-            train_loss_stage2 = train_one_epoch(
+            train_loss = train_one_epoch(
                 ddp_mp_model,
                 loss_function,
                 scheduler,
@@ -284,13 +291,21 @@ def trainer(rank, world_size, args):
                     f"Model saved for checkpoint:{args.num_stage_1_epochs+epoch} at location {args.save_path}_{args.num_stage_1_epochs+epoch}.pt"
                 )
                 print(
-                    f"Train loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {train_loss_stage2}"
+                    f"Train loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {train_loss}"
                 )
                 print(
                     f"Valid loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {valid_loss}"
                 )
                 print(
                     "---------------------------------/-------------------------------------"
+                )
+                wandb.log(
+                    {
+                        "validation_Accuracy": valid_acc,
+                        "test_accuracy": test_acc,
+                        "train_loss": train_loss,
+                        "valid_loss": valid_loss,
+                    }
                 )
 
 
@@ -348,7 +363,37 @@ if __name__ == "__main__":
         help="Version 1 is bigger model, same as in paper",
         default=False,
     )
-
+    parser.add_argument(
+        "--use_wandb",
+        type=bool,
+        help="Whether to use wandb online logger",
+        default=False,
+    )
+    parser.add_argument(
+        "--wandb_name",
+        type=bool,
+        help="Name of trial",
+        default=None,
+    )
     args = parser.parse_args()
-
+    if args.use_wandb:
+        wandb.init(
+            # set the wandb project where this run will be logged
+            project=args.wandb_name,
+            # track hyperparameters and run metadata
+            config={
+                "train_csv_file": args.train_csv_file,
+                "train_csv_file_stage2": args.train_csv_file_stage2,
+                "test_csv_file": args.test_csv_file,
+                "ngpu": args.ngpu,
+                "batch_size": args.batch_size,
+                "num_stage_1_epochs": args.num_stage_1_epochs,
+                "num_stage_2_epochs": args.num_stage_2_epochs,
+                "pretrained_model_path": args.pretrained_model_path,
+                "clip_norm": args.clip_norm,
+                "lr": args.lr,
+                "save_path": args.save_path,
+                "use_version_1": args.use_version_1,
+            },
+        )
     mp.spawn(main, args=(args.ngpu, args), nprocs=args.ngpu)
