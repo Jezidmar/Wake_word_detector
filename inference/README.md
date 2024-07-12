@@ -14,3 +14,5 @@ python3 your_script_name.py \
     --access_key "$ACCESS_KEY" \
     --keyword_path "$KEYWORD_PATH"
 ```
+
+I used 0.03 step size for the threshold, so to decrease compute.
