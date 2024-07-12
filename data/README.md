@@ -1,4 +1,4 @@
-# For data augmentation run following:
+### For data augmentation run following:
 ```
 python3 adding_background_noise_and_speech.py \
     --path_to_background_noise "$PATH_TO_BACKGROUND_NOISE" \
@@ -7,9 +7,17 @@ python3 adding_background_noise_and_speech.py \
     --save_path "$SAVE_PATH"
 ```
 
-# For offline feature extraction:
+### For offline feature extraction:
 ```
 python3 compute_npz_files.py \
     --path_to_audio_files "$PATH_TO_AUDIO_FILES" \
     --save_path "$SAVE_PATH"
+```
+
+### For concatenating positive samples so as to create additional data:
+```
+python3 your_script_name.py \
+    --path_to_audio_files "$PATH_TO_AUDIO_FILES" \
+    --save_path "$SAVE_PATH" \
+    --extra_percentage "$EXTRA_PERCENTAGE"
 ```
