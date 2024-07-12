@@ -79,6 +79,3 @@ python train_M1.py \
 Make sure you set master address and port correctly inside training script.
 
 Training scripts support logging with wandb. 
-
-If you want to train using wandb, you need wandb account and
-
