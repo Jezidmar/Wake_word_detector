@@ -24,55 +24,9 @@ from torch.utils.data.distributed import DistributedSampler
 # -----------------------------------------------------
 # Setting up ddp
 def ddp_setup(rank, world_size):
-    os.environ["MASTER_ADDR"] = ""
-    os.environ["MASTER_PORT"] = ""
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "65531"
     init_process_group(backend="nccl", rank=rank, world_size=world_size)
-
-
-def pad_feats(mel_spec, pad_amount):
-    """
-    Pads the mel spectrogram to a maximum length with a given pad value.
-
-    Args:
-    mel_spec (np.array): The mel spectrogram array (time x features).
-    max_length (int): The maximum length to pad the array.
-    pad_value (float, optional): The value used for padding. Defaults to 0.
-
-    Returns:
-    np.array: Padded mel spectrogram.
-    """
-    # Calculate the amount of padding needed
-    padding_pattern = (0, pad_amount)
-    pad_value = 0
-    adjusted_tensor = torch.nn.functional.pad(
-        mel_spec, padding_pattern, value=pad_value
-    )
-
-    return adjusted_tensor
-
-
-def test_file(feats, model, threshold=0.5):
-    start_frame = 0
-    end_frame = feats.shape[3]
-    probs = []
-    # print(end_frame)
-    if end_frame < 121:
-        # pad to 121
-        feats = pad_feats(feats, 121 - end_frame)
-        end_frame = 121
-    while start_frame + 121 <= end_frame:
-        chunk = feats[
-            :, :, :, start_frame : start_frame + 121
-        ]  # 1.2 seconds WINDOW size
-        # print(chunk.shape)
-        start_frame += 20  # Step size is 0.2 seconds ~ 20 frames
-        with torch.no_grad():
-            probs.append(torch.sigmoid(model(chunk)))
-    out_prob = torch.mean(torch.tensor(probs))
-    if out_prob > threshold:
-        return 1
-    else:
-        return 0
 
 
 class AudioDataset(Dataset):
@@ -149,6 +103,7 @@ def train_one_epoch(
             print(
                 f"Batch size: {args.batch_size} | step/total_steps: {i//args.num_devices} / {len(train_loader)//args.num_devices} | loss: {loss.cpu().item():.6f} | dt: {(t1-t0)*1000:.2f}ms | norm: {norm:.4f} | lr: {optimizer.param_groups[0]['lr']}"
             )
+            # TODO wandb.log({"loss": loss.cpu().item(), "step_time/ms": (t1-t0)*1000, "gradient_norm": norm, "lr":optimizer.param_groups[0]['lr'] })
         torch.cuda.empty_cache()
     scheduler.step()
     return train_loss / len(train_loader)
@@ -159,7 +114,6 @@ def valid_one_epoch(model, loss_function, valid_loader, args, device):
     total_num_correct = 0
     model.eval()
     for i, (feats, labels) in tqdm.tqdm(enumerate(valid_loader)):
-        # Your training process here
         features = feats.to(device)
         with torch.no_grad():
             outputs = model(features)
@@ -174,18 +128,6 @@ def valid_one_epoch(model, loss_function, valid_loader, args, device):
     average_accuracy = total_num_correct / ((i + 1) * args.batch_size)
     # print(f'Validation Accuracy: {average_accuracy:.2f}')
     return valid_loss / len(valid_loader), average_accuracy
-
-
-def test_one_epoch(model, test_loader, args):
-    device = args.device
-    model.eval()
-    total_num_correct = 0
-    for i, (feats, labels) in enumerate(test_loader):
-        features = feats.unsqueeze(1).to(device)
-        pred = test_file(features, model)
-        if pred == torch.squeeze(labels):
-            total_num_correct += 1
-    return total_num_correct / i
 
 
 def trainer(rank, world_size, args):
@@ -295,7 +237,7 @@ def trainer(rank, world_size, args):
         valid_loss, valid_acc = valid_one_epoch(
             ddp_mp_model, loss_function, valid_loader, args, device
         )
-        test_acc = test_one_epoch(
+        _, test_acc = valid_one_epoch(
             ddp_mp_model, loss_function, test_loader, args, device
         )
         if device == 0:
@@ -323,7 +265,7 @@ def trainer(rank, world_size, args):
         for epoch in range(args.num_stage_2_epochs):
             if device == 0:
                 print("Initiating second stage of training")
-            train_loss_stage2 = train_one_epoch(
+            train_loss = train_one_epoch(
                 ddp_mp_model,
                 loss_function,
                 scheduler,
@@ -335,22 +277,21 @@ def trainer(rank, world_size, args):
             valid_loss, valid_acc = valid_one_epoch(
                 ddp_mp_model, loss_function, valid_loader, args, device
             )
-            test_acc = test_one_epoch(ddp_mp_model, test_loader, args, device)
+            _, test_acc = valid_one_epoch(
+                ddp_mp_model, loss_function, test_loader, args, device
+            )
             if (
                 device == 0
             ):  # We perform validation and testing only on one gpu so as to have unambiguous results.
                 print(f"Validation Accuracy: {valid_acc:.2f}")
                 print(f"Test Accuracy: {test_acc:.2f}")
                 ckp = ddp_mp_model.module.state_dict()
-                torch.save(
-                    ckp,
-                    f"{args.save_path}_{args.num_stage_1_epochs+epoch}.pt",
-                )
+                torch.save(ckp, f"{args.save_path}_{args.num_stage_1_epochs+epoch}.pt")
                 print(
                     f"Model saved for checkpoint:{args.num_stage_1_epochs+epoch} at location {args.save_path}_{args.num_stage_1_epochs+epoch}.pt"
                 )
                 print(
-                    f"Train loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {train_loss_stage2}"
+                    f"Train loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {train_loss}"
                 )
                 print(
                     f"Valid loss at epoch:{args.num_stage_1_epochs+epoch} of second stage is: {valid_loss}"
@@ -368,7 +309,7 @@ def trainer(rank, world_size, args):
                 )
 
 
-def main(rank: int, world_size: int, args: dict):
+def main(rank: int, world_size: int, args):
     ddp_setup(rank, world_size)
     trainer(rank, world_size, args)
     destroy_process_group()
@@ -455,5 +396,4 @@ if __name__ == "__main__":
                 "use_version_1": args.use_version_1,
             },
         )
-
     mp.spawn(main, args=(args.ngpu, args), nprocs=args.ngpu)

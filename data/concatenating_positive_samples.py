@@ -14,7 +14,7 @@ def concat_positive_samples(directory, output_dir, extra_percentage=0.2):
     files = [
         f
         for f in os.listdir(directory)
-        if f.endswith(".wav") or f.endswith(".flac") or f.endwith(".mp4")
+        if f.endswith(".wav") or f.endswith(".flac") or f.endswith(".mp4")
     ]
 
     # Calculate the number of additional concatenated files to create (% of the original file count)

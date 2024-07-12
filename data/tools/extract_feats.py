@@ -22,7 +22,6 @@ def compute_mel_spectrogram(audio_path, mel_spectrogram, amplitude_to_db, n_mels
     waveform, _ = torchaudio.load(audio_path)
     mel_spec = mel_spectrogram(waveform)
     mel_spec_db = amplitude_to_db(mel_spec)
-    # mel_spec_normalized = (mel_spec_db - np.min(mel_spec_db)) / (np.max(mel_spec_db) - np.min(mel_spec_db) + 1e-8)
     transform = transforms.Compose(
         [
             transforms.Normalize(
@@ -38,7 +37,7 @@ def compute_mel_spectrogram(audio_path, mel_spectrogram, amplitude_to_db, n_mels
 
 
 def set_random_rows_to_zero(image_tensor, max_consecutive_rows):
-    height, width = image_tensor.shape[0], image_tensor.shape[1]
+    height, _ = image_tensor.shape[0], image_tensor.shape[1]
     # Handle case where the height is less than the max consecutive rows
     if height <= max_consecutive_rows:
         num_rows = (
@@ -55,7 +54,7 @@ def set_random_rows_to_zero(image_tensor, max_consecutive_rows):
 
 
 def set_random_columns_to_zero(image_tensor, max_consecutive_columns):
-    height, width = image_tensor.shape[0], image_tensor.shape[1]
+    _, width = image_tensor.shape[0], image_tensor.shape[1]
     # Handle case where the width is less than the max consecutive columns
     if width <= max_consecutive_columns:
         num_columns = (
