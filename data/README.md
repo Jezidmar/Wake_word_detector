@@ -16,7 +16,7 @@ python3 compute_npz_files.py \
 
 ### For concatenating positive samples so as to create additional data:
 ```
-python3 your_script_name.py \
+python3 concatenating_positive_samples.py \
     --path_to_audio_files "$PATH_TO_AUDIO_FILES" \
     --save_path "$SAVE_PATH" \
     --extra_percentage "$EXTRA_PERCENTAGE"
