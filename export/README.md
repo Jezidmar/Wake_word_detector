@@ -1,5 +1,5 @@
 ### For exporting trained module to .onnx file:
-```python
+```python3
 python3 convert_M0_to_onnx.py \
     --checkpoint_path "$CHECKPOINT_PATH" \
     --save_model_path "$SAVE_MODEL_PATH" \
