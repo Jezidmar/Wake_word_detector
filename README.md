@@ -53,7 +53,9 @@ python train_M0.py \
   --clip_norm 1.0 \
   --lr 3e-4 \
   --save_path /path/to/save/checkpoints \
-  --use_version_1 True
+  --use_version_1 True \
+  --use_wandb True \
+  --wandb_name trial12
 ```
 ### To initiate training of M1 model run following:
 ```
@@ -69,8 +71,14 @@ python train_M1.py \
   --clip_norm 1.0 \
   --lr 3e-4 \
   --save_path /path/to/save/checkpoints \
-  --use_version_1 True
+  --use_version_1 True \
+  --use_wandb True \
+  --wandb_name trial12
 ```
 
-Make sure you set master address and port correctly inside training script
+Make sure you set master address and port correctly inside training script.
+
+Training scripts support logging with wandb. 
+
+If you want to train using wandb, you need wandb account and
 
