@@ -17,7 +17,7 @@ For training each model, I used roughly 3M audio files from People's speech data
 </p>
 
 
-After the model is trained, we can convert it into onnx or tflite format suitable for edge device. Find .ipynb script for converting in /models folder.
+After the model is trained, we can convert it into onnx or tflite format suitable for edge device. Find script for converting in /export folder.
 
 ### For benchmarking performance, I devised 2 testing sets:
   
