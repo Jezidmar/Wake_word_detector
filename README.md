@@ -75,11 +75,14 @@ python train_M1.py \
   --use_wandb True \
   --wandb_name trial12
 ```
-### Comparison against Porcupine baseline:
-
-
-
 Make sure you set master address and port correctly inside training script.
 
 Training scripts support logging with wandb. 
+
+
+### Results: Comparison against Porcupine baseline:
+
+
+
+
 ![Alt text](images/DET_Curve_test_clean_Comparison.png)
